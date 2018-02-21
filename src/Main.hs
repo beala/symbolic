@@ -29,7 +29,9 @@ data Instr = Add
            | Load
            | Pop
            | Read
-           | Write
+           | Print
+           | Swap
+           | Dup
            | Done deriving (Eq, Show)
 
 -- | A program is a list of instructions.
@@ -51,9 +53,9 @@ run trace prg st@(pc, _, stack) = do
 
 step :: State -> Instr -> IO State
 step (pc, mem, l:r:stack) Add = return (pc+1, mem, l+r : stack)
-step (pc, mem, l:r:stack) JmpIf = return $
-  if l == 0 then (pc+1, mem, stack)
-  else (wordToInt r, mem, stack)
+step (pc, mem, cond:addr:stack) JmpIf = return $
+  if cond == 0 then (pc+1, mem, stack)
+  else (wordToInt addr, mem, stack)
 step (pc, mem, l:r:stack) And =
   let l' = wordToBool l
       r' = wordToBool r
@@ -98,9 +100,13 @@ step (pc, mem, stack) Read = do
   hFlush stdout
   w <- getLine
   return (pc+1, mem, (read w):stack)
-step (pc, mem, w:stack) Write = do
+step (pc, mem, w:stack) Print = do
   putStrLn (show w)
   return (pc+1, mem, stack)
+step (pc, mem, x:y:stack) Swap =
+  return (pc+1, mem, y:x:stack)
+step (pc, mem, w:stack) Dup =
+  return (pc+1, mem, w:w:stack)
 step _ Done =
   error "No state transition for Done!!"
 
@@ -130,19 +136,39 @@ isNegative w = B.testBit w 31
 
 main :: IO ()
 main = do
-  let Right prog = runST $ build 32 $ do
-        append $ Read
-        append $ Read
-        append Add
-        append $ Push 0
-        append Store
-        append $ Push 9
-        append $ Read
-        append JmpIf
-        append Done
-        append $ Push 0
-        append Load
-        append Done
+  args <- getArgs
+  let trace = elem "-t" args
+  let prog = listToProgram countDown
   putStrLn $ show prog
-  stack <- run True prog (0, M.empty, [])
+  stack <- run trace prog (0, M.empty, [])
   putStrLn $ show $ wordToSignedInt <$> stack
+
+countDown :: [Instr]
+countDown = [ Read
+            , Push (twosComplement 1)
+            , Add
+            , Dup
+            , Print
+            , Dup
+            , Push 1
+            , Swap
+            , JmpIf
+            , Done
+            ]
+
+addInputs :: [Instr]
+addInputs = [ Read
+            , Read
+            , Add
+            , Push 0
+            , Store
+            , Push 9
+            , Read
+            , JmpIf
+            , Done
+            , Push 0
+            , Load
+            , Done ]
+
+listToProgram :: [Instr] -> Prog
+listToProgram = fromList
