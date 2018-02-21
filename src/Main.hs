@@ -8,6 +8,12 @@ import Foundation.Collection
 import qualified Data.Map.Strict as M
 import Control.Monad.ST
 import qualified Data.Bits as B
+import qualified Data.Tree as T
+
+import Prelude (getLine, read)
+
+import System.IO (hFlush, stdout)
+import Control.Monad (when)
 
 import Debug.Trace
 
@@ -21,6 +27,9 @@ data Instr = Add
            | Push Word32
            | Store
            | Load
+           | Pop
+           | Read
+           | Write
            | Done deriving (Eq, Show)
 
 -- | A program is a list of instructions.
@@ -32,57 +41,68 @@ type Mem = M.Map Word32 Word32
 -- | State: (program counter, memory, stack)
 type State = (Int, Mem, [Word32])
 
-run :: State -> Prog -> [Word32]
-run st@(pc, _, stack) prg =
+run :: Bool -> Prog -> State-> IO [Word32]
+run trace prg st@(pc, _, stack) = do
   let Just instr = (prg ! (Offset pc))
-      newState = run' st instr
-  in
-    if instr == Done then stack
-    else run newState prg
+  when trace $ putStrLn $ "Trace: " <> (show pc) <> " " <> (show instr)
+  if instr == Done
+    then return stack
+    else step st instr >>= run trace prg
 
-run' :: State -> Instr -> State
-run' (pc, mem, l:r:stack) Add = (pc+1, mem, l+r : stack)
-run' (pc, mem, l:r:stack) JmpIf =
+step :: State -> Instr -> IO State
+step (pc, mem, l:r:stack) Add = return (pc+1, mem, l+r : stack)
+step (pc, mem, l:r:stack) JmpIf = return $
   if l == 0 then (pc+1, mem, stack)
   else (wordToInt r, mem, stack)
-run' (pc, mem, l:r:stack) And =
+step (pc, mem, l:r:stack) And =
   let l' = wordToBool l
       r' = wordToBool r
       res = boolToWord (l' && r')
   in
-    (pc+1, mem, res:stack)
-run' (pc, mem, l:r:stack) Or =
+    return (pc+1, mem, res:stack)
+step (pc, mem, l:r:stack) Or =
   let l' = wordToBool l
       r' = wordToBool r
       res = boolToWord (l' || r')
   in
-    (pc+1, mem, res:stack)
-run' (pc, mem, a:stack) Not =
+    return (pc+1, mem, res:stack)
+step (pc, mem, a:stack) Not =
   let a' = wordToBool a
       res = boolToWord a'
   in
-    (pc+1, mem, res:stack)  
-run' (pc, mem, l:r:stack) Lt =
+    return (pc+1, mem, res:stack)  
+step (pc, mem, l:r:stack) Lt =
   let l' = wordToInt l
       r' = wordToInt r
       res = boolToWord (l' < r')
   in
-    (pc+1, mem, res:stack)
-run' (pc, mem, l:r:stack) Eq =
+    return (pc+1, mem, res:stack)
+step (pc, mem, l:r:stack) Eq =
   let l' = wordToInt l
       r' = wordToInt r
       res = boolToWord (l' == r')
   in
-    (pc+1, mem, res:stack)
-run' (pc, mem, stack) (Push w) = (pc + 1, mem, w:stack)
-run' (pc, mem, addr:w:stack) Store =
+    return (pc+1, mem, res:stack)
+step (pc, mem, stack) (Push w) =
+  return (pc + 1, mem, w:stack)
+step (pc, mem, w:stack) (Pop) =
+  return (pc+1, mem, stack)
+step (pc, mem, addr:w:stack) Store =
   let mem' = M.insert addr w mem
-  in (pc + 1, mem', stack)
-run' (pc, mem, addr:stack) Load =
+  in return (pc + 1, mem', stack)
+step (pc, mem, addr:stack) Load =
   let Just w = M.lookup addr mem
-  in (pc + 1, mem, w:stack)
-    
-run' _ Done = error "No state transition for Done!!"
+  in return (pc + 1, mem, w:stack)
+step (pc, mem, stack) Read = do
+  putStr "? "
+  hFlush stdout
+  w <- getLine
+  return (pc+1, mem, (read w):stack)
+step (pc, mem, w:stack) Write = do
+  putStrLn (show w)
+  return (pc+1, mem, stack)
+step _ Done =
+  error "No state transition for Done!!"
 
 wordToInt :: Word32 -> Int
 wordToInt = fromIntegral . toInteger
@@ -111,10 +131,18 @@ isNegative w = B.testBit w 31
 main :: IO ()
 main = do
   let Right prog = runST $ build 32 $ do
-        append $ Push (twosComplement 100)
-        append $ Push 2
+        append $ Read
+        append $ Read
         append Add
+        append $ Push 0
+        append Store
+        append $ Push 9
+        append $ Read
+        append JmpIf
+        append Done
+        append $ Push 0
+        append Load
         append Done
   putStrLn $ show prog
-  let x:xs = run (0, M.empty, []) prog
-  putStrLn $ show $ wordToSignedInt x
+  stack <- run True prog (0, M.empty, [])
+  putStrLn $ show $ wordToSignedInt <$> stack
