@@ -32,6 +32,8 @@ data Instr = Add
            | Print
            | Swap
            | Dup
+           | Over
+           | Rot
            | Done deriving (Eq, Show)
 
 -- | A program is a list of instructions.
@@ -107,6 +109,10 @@ step (pc, mem, x:y:stack) Swap =
   return (pc+1, mem, y:x:stack)
 step (pc, mem, w:stack) Dup =
   return (pc+1, mem, w:w:stack)
+step (pc, mem, w:stack) Over =
+  return (pc+1, mem, w:stack <> [w])
+step (pc, mem, w:stack) Rot =
+  return (pc+1, mem, stack <> [w])
 step _ Done =
   error "No state transition for Done!!"
 
@@ -175,6 +181,8 @@ symStep (pc, i, mem, cond:addr:stack, cs) JmpIf =
   -- If the jump address is not concrete, don't explore the branch
   pure (pc+1, i, mem, stack, cs)
 symStep (pc, i, mem, _:stack, cs) Pop = pure (pc+1, i, mem, stack, cs)
+symStep (pc, i, mem, w:stack, cs) Over = pure (pc+1, i, mem, w:stack <> [w], cs)
+symStep (pc, i, mem, w:stack, cs) Rot = pure (pc+1, i, mem, stack <> [w], cs)
 symStep _ Done = error "No step for Done"
 
 defaultSymState = (0, 0, M.empty, [], [])

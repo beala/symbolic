@@ -12,11 +12,46 @@ cabal-version:       >=1.10
 extra-source-files:  README.md
 
 executable symbolic
+  ghc-options:         -Wall -Wcompat -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints
   hs-source-dirs:      src
   main-is:             Main.hs
   default-language:    Haskell2010
   default-extensions:  NoImplicitPrelude
                      , OverloadedStrings
+                     , ApplicativeDo
+                     , BangPatterns
+                     , ConstraintKinds
+                     , DataKinds
+                     , DefaultSignatures
+                     , DeriveFoldable
+                     , DeriveFunctor
+                     , DeriveGeneric
+                     , DeriveLift
+                     , DeriveTraversable
+                     , DerivingStrategies
+                     , EmptyCase
+                     , ExistentialQuantification
+                     , FlexibleContexts
+                     , FlexibleInstances
+                     , FunctionalDependencies
+                     , GADTs
+                     , GeneralizedNewtypeDeriving
+                     , InstanceSigs
+                     , KindSignatures
+                     , LambdaCase
+                     , MultiParamTypeClasses
+                     , MultiWayIf
+                     , NamedFieldPuns
+                     , OverloadedStrings
+                     , PatternSynonyms
+                     , RankNTypes
+                     , ScopedTypeVariables
+                     , StandaloneDeriving
+                     , TupleSections
+                     , TypeApplications
+                     , TypeFamilies
+                     , TypeFamilyDependencies
+                     , TypeOperators
   build-depends:       base >= 4.7 && < 5
                      , foundation
                      , containers
