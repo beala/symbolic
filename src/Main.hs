@@ -138,19 +138,19 @@ data Constraint = CAdd Constraint Constraint
                 | CEq
                 | CLt
                 | CCon Word32
-                | CAny deriving (Show, Eq)
+                | CAny Int deriving (Show, Eq)
 
 renderConstraint :: Constraint -> String
 renderConstraint (CAdd l r) = renderConstraint l <> " + " <> renderConstraint r
 renderConstraint (CCon w) = show (wordToSignedInt w)
-renderConstraint CAny = "?"
+renderConstraint (CAny i) = "var_" <> (show i)
 
-type SymState = (Int, M.Map Word32 Constraint, [Constraint])
+type SymState = (Int, Int, M.Map Word32 Constraint, [Constraint])
 
 type Trace = T.Tree SymState
 
 symbolic :: Int -> Prog -> SymState -> Trace
-symbolic i prog st@(pc, _, _) =
+symbolic i prog st@(pc, _, _, _) =
   let Just instr = prog ! (Offset pc)
       newState = symStep st instr
   in
@@ -159,20 +159,20 @@ symbolic i prog st@(pc, _, _) =
     else T.Node st []
 
 symStep :: SymState -> Instr -> [SymState]
-symStep (pc, mem, l:r:stack) Add = pure (pc+1, mem, CAdd l r : stack)
-symStep (pc, mem, stack) Read = pure (pc+1, mem, CAny : stack)
-symStep (pc, mem, stack) (Push w) = pure (pc+1, mem, CCon w : stack)
-symStep (pc, mem, w:stack) Dup = pure (pc+1, mem, w:w:stack)
-symStep (pc, mem, w:stack) Print = pure (pc+1, mem, stack)
-symStep (pc, mem, x:y:stack) Swap = pure (pc+1, mem, y:x:stack)
-symStep (pc, mem, cond:CCon addr:stack) JmpIf =
-  [ (pc+1, mem, stack)
-  , (wordToInt addr, mem, stack)
+symStep (pc, i, mem, l:r:stack) Add = pure (pc+1, i, mem, CAdd l r : stack)
+symStep (pc, i, mem, stack) Read = pure (pc+1, i+1, mem, CAny i : stack)
+symStep (pc, i, mem, stack) (Push w) = pure (pc+1, i, mem, CCon w : stack)
+symStep (pc, i, mem, w:stack) Dup = pure (pc+1, i, mem, w:w:stack)
+symStep (pc, i, mem, w:stack) Print = pure (pc+1, i, mem, stack)
+symStep (pc, i, mem, x:y:stack) Swap = pure (pc+1, i, mem, y:x:stack)
+symStep (pc, i, mem, cond:CCon addr:stack) JmpIf =
+  [ (pc+1, i, mem, stack)
+  , (wordToInt addr, i, mem, stack)
   ]
-symStep (pc, mem, cond:addr:stack) JmpIf =
+symStep (pc, i, mem, cond:addr:stack) JmpIf =
   -- If the jump address is not concrete, don't explore the branch
-  pure (pc+1, mem, stack)
-symStep (pc, mem, _:stack) Pop = pure (pc+1, mem, stack)
+  pure (pc+1, i, mem, stack)
+symStep (pc, i, mem, _:stack) Pop = pure (pc+1, i, mem, stack)
 symStep _ Done = error "No step for Done"
 
 main :: IO ()
@@ -184,8 +184,8 @@ main = do
   stack <- run trace prog (0, M.empty, [])
   putStrLn $ show $ wordToSignedInt <$> stack
 
-  let traces = symbolic 20 prog (0, M.empty, [])
-  putStrLn $ fromString $ T.drawTree $ fmap (toList . show . \(pc,_,st) -> (pc, renderConstraint <$> st)) traces
+  let traces = symbolic 20 prog (0, 0, M.empty, [])
+  putStrLn $ fromString $ T.drawTree $ fmap (toList . show . \(pc,_,_,st) -> (pc, renderConstraint <$> st)) traces
 
 countDown :: [Instr]
 countDown = [ Read
