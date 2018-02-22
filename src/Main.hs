@@ -6,7 +6,6 @@ import Foundation
 import Foundation.Collection
 
 import qualified Data.Map.Strict as M
-import Control.Monad.ST
 import qualified Data.Bits as B
 import qualified Data.Tree as T
 
@@ -14,8 +13,6 @@ import Prelude (getLine, read)
 
 import System.IO (hFlush, stdout)
 import Control.Monad (when)
-
-import Debug.Trace
 
 data Instr = Add
            | JmpIf
@@ -89,7 +86,7 @@ step (pc, mem, l:r:stack) Eq =
     return (pc+1, mem, res:stack)
 step (pc, mem, stack) (Push w) =
   return (pc + 1, mem, w:stack)
-step (pc, mem, w:stack) (Pop) =
+step (pc, mem, _:stack) (Pop) =
   return (pc+1, mem, stack)
 step (pc, mem, addr:w:stack) Store =
   let mem' = M.insert addr w mem
@@ -171,20 +168,22 @@ symStep (pc, i, mem, l:r:stack, cs) Add = pure (pc+1, i, mem, CAdd l r : stack, 
 symStep (pc, i, mem, stack, cs) Read = pure (pc+1, i+1, mem, CAny i : stack, cs)
 symStep (pc, i, mem, stack, cs) (Push w) = pure (pc+1, i, mem, CCon w : stack, cs)
 symStep (pc, i, mem, w:stack, cs) Dup = pure (pc+1, i, mem, w:w:stack, cs)
-symStep (pc, i, mem, w:stack, cs) Print = pure (pc+1, i, mem, stack, cs)
+symStep (pc, i, mem, _:stack, cs) Print = pure (pc+1, i, mem, stack, cs)
 symStep (pc, i, mem, x:y:stack, cs) Swap = pure (pc+1, i, mem, y:x:stack, cs)
 symStep (pc, i, mem, cond:CCon addr:stack, cs) JmpIf =
   [ (pc+1, i, mem, stack, (CEq cond (CCon 0)) : cs)
   , (wordToInt addr, i, mem, stack, (CNot (CEq cond (CCon 0))):cs)
   ]
-symStep (pc, i, mem, cond:addr:stack, cs) JmpIf =
-  -- If the jump address is not concrete, don't explore the branch
+symStep (pc, i, mem, _:_:stack, cs) JmpIf =
+  -- If the jump address is not concrete, don't explore that branch
+  -- The jump could be to anywhere in the program.
   pure (pc+1, i, mem, stack, cs)
 symStep (pc, i, mem, _:stack, cs) Pop = pure (pc+1, i, mem, stack, cs)
 symStep (pc, i, mem, w:stack, cs) Over = pure (pc+1, i, mem, w:stack <> [w], cs)
 symStep (pc, i, mem, w:stack, cs) Rot = pure (pc+1, i, mem, stack <> [w], cs)
 symStep _ Done = error "No step for Done"
 
+defaultSymState :: SymState
 defaultSymState = (0, 0, M.empty, [], [])
 
 main :: IO ()
@@ -196,7 +195,7 @@ main = do
   stack <- run trace prog (0, M.empty, [])
   putStrLn $ show $ wordToSignedInt <$> stack
 
-  let traces = symbolic 20 prog (0, 0, M.empty, [], [])
+  let traces = symbolic 20 prog defaultSymState
   putStrLn $ fromString $ T.drawTree $ fmap (toList . show . \(pc,_,_,st,cs) -> (pc, renderConstraint <$> st, renderConstraint <$> cs)) traces
 
 countDown :: [Instr]
