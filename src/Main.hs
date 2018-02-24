@@ -169,6 +169,9 @@ renderConstraint (CCon w) = show (wordToSignedInt w)
 renderConstraint (CAny i) = "val_" <> (show i)
 renderConstraint (CEq l r) = renderConstraint l <> " = " <> renderConstraint r
 renderConstraint (CNot c) = "~(" <> renderConstraint c <> ")"
+renderConstraint (CAnd l r) = renderConstraint l <> " ∧ " <> renderConstraint r
+renderConstraint (COr l r) = renderConstraint l <> " ∨ " <> renderConstraint r
+renderConstraint (CLt l r) = renderConstraint l <> " < " <> renderConstraint r
 
 type SymState = (Int, Int, M.Map Word32 Constraint, [Constraint], [Constraint])
 
