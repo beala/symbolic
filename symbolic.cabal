@@ -55,3 +55,4 @@ executable symbolic
   build-depends:       base >= 4.7 && < 5
                      , foundation
                      , containers
+                     , sbv
