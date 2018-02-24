@@ -32,7 +32,6 @@ data Instr = Add
            | Dup
            | Over
            | RotL
-           | RotR
            | Done deriving (Eq, Show)
 
 -- | A program is a list of instructions.
@@ -54,48 +53,59 @@ run trace prg st@(pc, _, stack) = do
 
 step :: State -> Instr -> IO State
 step (pc, mem, l:r:stack) Add = return (pc+1, mem, l+r : stack)
+step _ Add = error "Add expects two argument."
 step (pc, mem, cond:addr:stack) JmpIf = return $
   if cond == 0 then (pc+1, mem, stack)
   else (wordToInt addr, mem, stack)
+step _ JmpIf = error "JmpIf expects 2 arguments."
 step (pc, mem, l:r:stack) And =
   let l' = wordToBool l
       r' = wordToBool r
       res = boolToWord (l' && r')
   in
     return (pc+1, mem, res:stack)
+step _ And = error "And expects two arguments."
 step (pc, mem, l:r:stack) Or =
   let l' = wordToBool l
       r' = wordToBool r
       res = boolToWord (l' || r')
   in
     return (pc+1, mem, res:stack)
+step _ Or = error "Or expects two arguments."
 step (pc, mem, a:stack) Not =
   let a' = wordToBool a
       res = boolToWord (not a')
   in
-    return (pc+1, mem, res:stack)  
+    return (pc+1, mem, res:stack)
+step _ Not = error "Not expects one argument."
 step (pc, mem, l:r:stack) Lt =
   let l' = wordToInt l
       r' = wordToInt r
       res = boolToWord (l' < r')
   in
     return (pc+1, mem, res:stack)
+step _ Lt = error "Lt expects two arguments."
 step (pc, mem, l:r:stack) Eq =
   let l' = wordToInt l
       r' = wordToInt r
       res = boolToWord (l' == r')
   in
     return (pc+1, mem, res:stack)
+step _ Eq = error "Eq expects two arguments."
 step (pc, mem, stack) (Push w) =
   return (pc + 1, mem, w:stack)
 step (pc, mem, _:stack) (Pop) =
   return (pc+1, mem, stack)
+step _ Pop = error "Pop expects one argument."
 step (pc, mem, addr:w:stack) Store =
   let mem' = M.insert addr w mem
   in return (pc + 1, mem', stack)
+step _ Store = error "Store expects two arguments."
 step (pc, mem, addr:stack) Load =
-  let Just w = M.lookup addr mem
-  in return (pc + 1, mem, w:stack)
+  case  M.lookup addr mem of
+    Just w -> return (pc + 1, mem, w:stack)
+    Nothing -> error "Nothing to load at address."
+step _ Load = error "Load expects one argument."
 step (pc, mem, stack) Read = do
   putStr "? "
   hFlush stdout
@@ -104,14 +114,19 @@ step (pc, mem, stack) Read = do
 step (pc, mem, w:stack) Print = do
   putStrLn (show w)
   return (pc+1, mem, stack)
+step _ Print = error "Print expects one argument."
 step (pc, mem, x:y:stack) Swap =
   return (pc+1, mem, y:x:stack)
+step _ Swap = error "Swap expects two arguments."
 step (pc, mem, w:stack) Dup =
   return (pc+1, mem, w:w:stack)
+step _ Dup = error "Dup expects one argument."
 step (pc, mem, w:stack) Over =
   return (pc+1, mem, w:stack <> [w])
+step _ Over = error "Over expects one argument."
 step (pc, mem, w:stack) RotL =
   return (pc+1, mem, stack <> [w])
+step _ RotL = error "RotL expects one argument."
 step _ Done =
   error "No state transition for Done!!"
 
@@ -142,7 +157,10 @@ isNegative w = B.testBit w 31
 data Constraint = CAdd Constraint Constraint
                 | CEq Constraint Constraint
                 | CNot Constraint
+                | COr Constraint Constraint
                 | CCon Word32
+                | CAnd Constraint Constraint
+                | CLt Constraint Constraint
                 | CAny Int deriving (Show, Eq)
 
 renderConstraint :: Constraint -> String
@@ -167,12 +185,17 @@ symbolic i prog st@(pc, _, _, _, _) =
 
 symStep :: SymState -> Instr -> [SymState]
 symStep (pc, i, mem, l:r:stack, cs) Add = pure (pc+1, i, mem, CAdd l r : stack, cs)
+symStep _ Add = error "Add expects two arguments."
 symStep (pc, i, mem, stack, cs) Read = pure (pc+1, i+1, mem, CAny i : stack, cs)
 symStep (pc, i, mem, stack, cs) (Push w) = pure (pc+1, i, mem, CCon w : stack, cs)
 symStep (pc, i, mem, _:stack, cs) Pop = pure (pc+1, i, mem, stack, cs)
+symStep _ Pop = error "Pop expects one argument."
 symStep (pc, i, mem, w:stack, cs) Dup = pure (pc+1, i, mem, w:w:stack, cs)
+symStep _ Dup = error "Dup expects one argument."
 symStep (pc, i, mem, _:stack, cs) Print = pure (pc+1, i, mem, stack, cs)
+symStep _ Print = error "Print expects one argument."
 symStep (pc, i, mem, x:y:stack, cs) Swap = pure (pc+1, i, mem, y:x:stack, cs)
+symStep _ Swap = error "Swap expects two arguments."
 symStep (pc, i, mem, cond:CCon addr:stack, cs) JmpIf =
   [ (pc+1, i, mem, stack, (CEq cond (CCon 0)) : cs)
   , (wordToInt addr, i, mem, stack, (CNot (CEq cond (CCon 0))):cs)
@@ -181,9 +204,34 @@ symStep (pc, i, mem, _:_:stack, cs) JmpIf =
   -- If the jump address is not concrete, don't explore that branch
   -- The jump could be to anywhere in the program.
   pure (pc+1, i, mem, stack, cs)
+symStep _ JmpIf = error "JmpIf expects two arguments."
 symStep (pc, i, mem, w:stack, cs) Over = pure (pc+1, i, mem, w:stack <> [w], cs)
+symStep _ Over = error "Over expects one argument."
 symStep (pc, i, mem, w:stack, cs) RotL = pure (pc+1, i, mem, stack <> [w], cs)
+symStep _ RotL = error "RotL expects one argument."
 symStep (pc, i, mem, w:stack, cs) Not = pure (pc+1, i, mem, CNot w:stack, cs)
+symStep _ Not = error "Not expects one argument."
+symStep (pc, i, mem, l:r:stack, cs) And = pure (pc+1, i, mem, CAnd l r:stack, cs)
+symStep _ And = error "And expects two arguments."
+symStep (pc, i, mem, l:r:stack, cs) Or = pure (pc+1, i, mem, COr l r:stack, cs)
+symStep _ Or = error "Or expects two arguments."
+symStep (pc, i, mem, l:r:stack, cs) Lt = pure (pc+1, i, mem, CLt l r: stack, cs)
+symStep _ Lt = error "Lt expects two arguments."
+symStep (pc, i, mem, l:r:stack, cs) Eq = pure (pc+1, i, mem, CEq l r: stack, cs)
+symStep _ Eq = error "Eq expects two arguments."
+symStep (pc, i, mem, CCon addr:w:stack, cs) Store = pure (pc+1, i, M.insert addr w mem, stack, cs)
+symStep (pc, i, mem, _:_:stack, cs) Store =
+  -- Only handle concrete addresses for now.
+  pure (pc+1, i, mem, stack, cs)
+symStep _ Store = error "Store expects two arguments."
+symStep (pc, i, mem, CCon addr:stack, cs) Load =
+  case M.lookup addr mem of
+    Just w -> pure (pc+1, i, mem, w:stack, cs)
+    Nothing -> error "Nothing to Load at address."
+symStep (pc, i, mem, _:stack, cs) Load =
+  -- Only handle concrete addresses for now.
+  pure (pc+1, i+1, mem, CAny i: stack, cs)
+symStep _ Load = error "Store expects two arguments."
 symStep _ Done = error "No step for Done"
 
 defaultSymState :: SymState
