@@ -56,3 +56,4 @@ executable symbolic
                      , foundation
                      , containers
                      , sbv
+                     , mtl

@@ -8,7 +8,11 @@ import Foundation.Collection
 import qualified Data.Map.Strict as M
 import qualified Data.Bits as B
 import qualified Data.Tree as T
-import qualified Data.SBV as S
+import qualified Data.SBV.Dynamic as S
+
+import Control.Monad.Trans  (liftIO)
+import Control.Monad.Reader (ask)
+import qualified Control.Monad.State.Lazy as St
 
 import Prelude (getLine, read)
 
@@ -166,12 +170,69 @@ data Constraint = CAdd Constraint Constraint
 renderConstraint :: Constraint -> String
 renderConstraint (CAdd l r) = renderConstraint l <> " + " <> renderConstraint r
 renderConstraint (CCon w) = show (wordToSignedInt w)
-renderConstraint (CAny i) = "val_" <> (show i)
+renderConstraint (CAny i) = valName i
 renderConstraint (CEq l r) = renderConstraint l <> " = " <> renderConstraint r
 renderConstraint (CNot c) = "~(" <> renderConstraint c <> ")"
-renderConstraint (CAnd l r) = renderConstraint l <> " ∧ " <> renderConstraint r
-renderConstraint (COr l r) = renderConstraint l <> " ∨ " <> renderConstraint r
+renderConstraint (CAnd l r) = renderConstraint l <> " and " <> renderConstraint r
+renderConstraint (COr l r) = renderConstraint l <> " or " <> renderConstraint r
 renderConstraint (CLt l r) = renderConstraint l <> " < " <> renderConstraint r
+
+valName :: Int -> String
+valName i = "val_" <> (show i)
+
+type SValMap = M.Map Int (S.Symbolic S.SVal)
+
+constraintToSMT :: Constraint
+                -> St.State SValMap (S.Symbolic S.SVal)
+constraintToSMT (CEq l r) = do
+  l' <- constraintToSMT l
+  r' <- constraintToSMT r
+  return $ sValToSWord <$> (S.svEqual <$> l' <*> r')
+constraintToSMT (CAdd l r) = do
+  l' <- constraintToSMT l
+  r' <- constraintToSMT r
+  return $ S.svPlus <$> l' <*> r'
+constraintToSMT (CCon w) =
+  return $ return $ wordToSVal w
+constraintToSMT (CNot c) = do
+  c' <- constraintToSMT c
+  return $ sValToSWord <$> S.svNot <$> (sValToSBool <$> c')
+constraintToSMT (COr l r) = do
+  l' <- constraintToSMT l
+  r' <- constraintToSMT r
+  return $ sValToSWord <$> (S.svOr
+                            <$> (sValToSBool <$> (l'))
+                            <*> (sValToSBool <$> (r')))
+constraintToSMT (CAnd l r) = do
+  l' <- constraintToSMT l
+  r' <- constraintToSMT r
+  return $ sValToSWord <$> (S.svAnd
+                             <$> (sValToSBool <$> (l'))
+                             <*> (sValToSBool <$> (r')))
+constraintToSMT (CLt l r) = do
+  l' <- constraintToSMT l
+  r' <- constraintToSMT r
+  return $  sValToSWord <$> (S.svLessThan
+                             <$> (l')
+                             <*> (r'))
+constraintToSMT (CAny i) = do
+  m <- St.get
+  case M.lookup i m of
+    Just val -> return val
+    Nothing -> do
+      let val = ask >>= liftIO . S.svMkSymVar (Just S.EX) (S.KBounded False 32) (Just readableName)
+      St.modify (M.insert i val)
+      return val
+  where readableName = toList . valName $ i
+
+wordToSVal :: Word32 -> S.SVal
+wordToSVal w = S.svInteger (S.KBounded False 32) (toInteger w)
+
+sValToSBool :: S.SVal -> S.SVal
+sValToSBool w = w `S.svNotEqual` (wordToSVal 0)
+
+sValToSWord :: S.SVal -> S.SVal
+sValToSWord w = S.svIte w (wordToSVal 1) (wordToSVal 0) 
 
 type SymState = (Int, Int, M.Map Word32 Constraint, [Constraint], [Constraint])
 
@@ -200,8 +261,8 @@ symStep _ Print = error "Print expects one argument."
 symStep (pc, i, mem, x:y:stack, cs) Swap = pure (pc+1, i, mem, y:x:stack, cs)
 symStep _ Swap = error "Swap expects two arguments."
 symStep (pc, i, mem, cond:CCon addr:stack, cs) JmpIf =
-  [ (pc+1, i, mem, stack, (CEq cond (CCon 0)) : cs)
-  , (wordToInt addr, i, mem, stack, (CNot (CEq cond (CCon 0))):cs)
+  [ (pc+1, i, mem, stack, CEq cond (CCon 0) : cs)
+  , (wordToInt addr, i, mem, stack, CNot (CEq cond (CCon 0)) : cs)
   ]
 symStep (pc, i, mem, _:_:stack, cs) JmpIf =
   -- If the jump address is not concrete, don't explore that branch
@@ -240,6 +301,19 @@ symStep _ Done = error "No step for Done"
 defaultSymState :: SymState
 defaultSymState = (0, 0, M.empty, [], [])
 
+data SolvedState = SolvedState SymState S.SMTResult
+
+solveSym :: Trace -> IO (T.Tree SolvedState)
+solveSym (T.Node state@(_, _, _, _, cs) c) = do
+  let smtExpr = conjoin (St.evalState (traverse constraintToSMT cs) M.empty)
+  S.SatResult smtRes <- S.satWith S.z3 smtExpr
+  children <- traverse solveSym c
+  return $ T.Node (SolvedState state smtRes) children
+
+conjoin :: [S.Symbolic S.SVal] -> S.Symbolic S.SVal
+conjoin (x:xs) = S.svAnd <$> (sValToSBool <$> x) <*> (conjoin xs)
+conjoin [] = return S.svTrue
+
 main :: IO ()
 main = do
   args <- getArgs
@@ -248,9 +322,28 @@ main = do
   putStrLn $ show prog
   stack <- run trace prog (0, M.empty, [])
   putStrLn $ show $ wordToSignedInt <$> stack
-
-  let traces = symbolic 25 prog defaultSymState
+  let traces = symbolic 20 prog defaultSymState
   putStrLn $ fromString $ T.drawTree $ fmap (toList . show . \(pc,_,_,st,cs) -> (pc, renderConstraint <$> st, renderConstraint <$> cs)) traces
+  solvedTraces <- solveSym traces
+  putStrLn $ fromString $ T.drawTree $ fmap (toList . renderSolvedState) solvedTraces
+
+renderSMTResult :: S.SMTResult -> String
+renderSMTResult (S.Unsatisfiable _) = "Unsatisfiable"
+renderSMTResult s@(S.Satisfiable _ _) = renderDict $ M.mapKeys fromList $ S.getModelDictionary s
+renderSMTResult _ = "Error"
+
+renderSolvedState :: SolvedState -> String
+renderSolvedState (SolvedState (pc,_,_,st,cs) c) =
+  "PC: " <> show pc <> "\n" <>
+  "Stack: " <> show (renderConstraint <$> st) <> "\n" <>
+  "Path Constraints: " <> show (renderConstraint <$> cs) <> "\n" <>
+  "Solved Values: " <> renderSMTResult c
+                    
+renderDict :: (Show v) => M.Map String v -> String
+renderDict m =
+  foldr toStr "" (M.toList m)
+  where toStr (k,v) s = k <> ": " <> show v <> ", " <> s
+  -- show $ M.toList m
 
 countDown :: [Instr]
 countDown = [ Read
@@ -265,6 +358,25 @@ countDown = [ Read
             , Pop
             , Done
             ]
+
+countUp :: [Instr]
+countUp = [ Push 0
+          , Read
+          , Dup
+          , RotL
+          , RotL
+          , Push 1
+          , Add
+          , Dup
+          , Print
+          , Dup
+          , RotL
+          , Eq
+          , Not
+          , Push 2
+          , Swap
+          , JmpIf
+          , Done]
 
 multiply :: [Instr]
 multiply = [ Read
