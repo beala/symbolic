@@ -40,7 +40,7 @@ data Constraint = CAdd Constraint Constraint
                 | CCon Word32
                 | CAnd Constraint Constraint
                 | CLt Constraint Constraint
-                | CAny Int deriving (Show, Eq)
+                | CAny Int deriving (Show, Eq, Ord)
 
 type SymState = (Int, Int, M.Map Word32 Constraint, [Constraint], [Constraint])
 

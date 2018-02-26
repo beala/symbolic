@@ -5,7 +5,7 @@ import Foundation.Collection
 
 import qualified Data.Map.Strict as M
 import qualified Data.Tree as T
-import qualified Control.Monad.State.Lazy as St
+import qualified Data.Set as S
 import Control.Monad.Reader (ask)
 import Control.Monad.Trans (liftIO)
 import qualified Data.SBV.Dynamic as S
@@ -16,49 +16,71 @@ import Symbolic
 
 type SValMap = M.Map Int (S.Symbolic S.SVal)
 
-constraintToSMT :: Constraint
-                -> St.State SValMap (S.Symbolic S.SVal)
-constraintToSMT (CEq l r) = do
-  l' <- constraintToSMT l
-  r' <- constraintToSMT r
-  return $ sValToSWord <$> (S.svEqual <$> l' <*> r')
-constraintToSMT (CAdd l r) = do
-  l' <- constraintToSMT l
-  r' <- constraintToSMT r
-  return $ S.svPlus <$> l' <*> r'
-constraintToSMT (CCon w) =
-  return $ return $ wordToSVal w
-constraintToSMT (CNot c) = do
-  c' <- constraintToSMT c
-  return $ sValToSWord <$> S.svNot <$> (sValToSBool <$> c')
-constraintToSMT (COr l r) = do
-  l' <- constraintToSMT l
-  r' <- constraintToSMT r
-  return $ sValToSWord <$> (S.svOr
-                            <$> (sValToSBool <$> (l'))
-                            <*> (sValToSBool <$> (r')))
-constraintToSMT (CAnd l r) = do
-  l' <- constraintToSMT l
-  r' <- constraintToSMT r
-  return $ sValToSWord <$> (S.svAnd
-                             <$> (sValToSBool <$> (l'))
-                             <*> (sValToSBool <$> (r')))
-constraintToSMT (CLt l r) = do
-  l' <- constraintToSMT l
-  r' <- constraintToSMT r
-  return $  sValToSWord <$> (S.svLessThan
-                             <$> (l')
-                             <*> (r'))
-constraintToSMT (CAny i) = do
-  m <- St.get
+-- | Walk the constraint gathering up the free
+-- | variables.
+gatherFree :: Constraint -> S.Set Constraint
+gatherFree c@(CAny _) = S.singleton c
+gatherFree (CAdd l r) = gatherFree l <> gatherFree r
+gatherFree (CEq l r) = gatherFree l <> gatherFree r
+gatherFree (CNot c) = gatherFree c
+gatherFree (COr l r) = gatherFree l <> gatherFree r
+gatherFree (CAnd l r) = gatherFree l <> gatherFree r
+gatherFree (CLt l r) = gatherFree l <> gatherFree r
+gatherFree (CCon _) = mempty
+
+-- | Create an existential word of `i` bits with
+-- | the name `name`.
+sWordEx :: Int -> String -> S.Symbolic S.SVal
+sWordEx i name =  ask >>= liftIO . S.svMkSymVar (Just S.EX) (S.KBounded False i) (Just (toList name))
+
+-- | Create existential SVals for each of CAny's in the input.
+createSym :: [Constraint] -> S.Symbolic (M.Map Int S.SVal)
+createSym cs = do
+  pairs <- traverse createSymPair cs
+  return $  M.fromList pairs
+  where readableName i = valName $ i
+        createSymPair (CAny i) = do
+          v <- sWordEx 32 (readableName i)
+          return (i, v)
+        createSymPair _ = error "Non-variable encountered."
+
+-- | Convert a list of path constraints to a
+-- | symbolic value the SMT solver can solve.
+-- | Each constraint in the list is conjoined
+-- | with the others.
+toSMT :: [Constraint] -> S.Symbolic S.SVal
+toSMT c = do
+  let cs = gatherFree (foldr CAnd (CCon 1) c)
+  sValMap <- createSym (S.toList cs)
+  smts <- traverse (constraintToSMT sValMap) c
+  return $ conjoin smts
+
+constraintToSMT :: M.Map Int S.SVal -> Constraint -> S.Symbolic S.SVal
+constraintToSMT m (CEq l r) =
+  sValToSWord <$> (S.svEqual <$> constraintToSMT m l <*> constraintToSMT m r)
+constraintToSMT m (CAdd l r) =
+  S.svPlus <$> constraintToSMT m l <*> constraintToSMT m r
+constraintToSMT _ (CCon w) =  return $ wordToSVal w
+constraintToSMT m (CNot c) =
+  let c' = constraintToSMT m c
+  in sValToSWord <$> (S.svNot <$> (sValToSBool <$> c'))
+constraintToSMT m (COr l r) =
+  let l' = sValToSBool <$> constraintToSMT m l
+      r' = sValToSBool <$> constraintToSMT m r
+  in
+  sValToSWord <$> (S.svOr <$> l' <*> r')
+constraintToSMT m (CAnd l r) =
+  let l' = sValToSBool <$> constraintToSMT m l
+      r' = sValToSBool <$> constraintToSMT m r
+  in
+    sValToSWord <$> (S.svAnd <$> l' <*> r')
+constraintToSMT m (CLt l r) =
+  sValToSWord <$> (S.svLessThan <$> constraintToSMT m l <*> constraintToSMT m r)
+constraintToSMT m (CAny i) = do
   case M.lookup i m of
     Just val -> return val
-    Nothing -> do
-      let val = ask >>= liftIO . S.svMkSymVar (Just S.EX) (S.KBounded False 32) (Just readableName)
-      St.modify (M.insert i val)
-      return val
-  where readableName = toList . valName $ i
-
+    Nothing -> error "Missing symbolic variable."
+    
 wordToSVal :: Word32 -> S.SVal
 wordToSVal w = S.svInteger (S.KBounded False 32) (toInteger w)
 
@@ -77,23 +99,22 @@ renderSolvedState :: SolvedState -> String
 renderSolvedState (SolvedState (pc,_,_,st,cs) c) =
   "PC: " <> show pc <> "\n" <>
   "Stack: " <> show (renderConstraint <$> st) <> "\n" <>
-  "Path Constraints: " <> show (renderConstraint <$> cs) <> "\n" <>
+  "Path Constraints: " <> show (renderConstraint (foldr CAnd (CCon 1) cs)) <> "\n" <>
   "Solved Values: " <> renderSMTResult c
                     
 renderDict :: (Show v) => M.Map String v -> String
 renderDict m =
   foldr toStr "" (M.toList m)
-  where toStr (k,v) s = k <> ": " <> show v <> ", " <> s
+  where toStr (k,v) s = k <> " = " <> show v <> ", " <> s
 
 data SolvedState = SolvedState SymState S.SMTResult
 
 solveSym :: Trace -> IO (T.Tree SolvedState)
 solveSym (T.Node state@(_, _, _, _, cs) c) = do
-  let smtExpr = conjoin (St.evalState (traverse constraintToSMT cs) M.empty)
+  let smtExpr = toSMT cs
   S.SatResult smtRes <- S.satWith S.z3 smtExpr
   children <- traverse solveSym c
   return $ T.Node (SolvedState state smtRes) children
 
-conjoin :: [S.Symbolic S.SVal] -> S.Symbolic S.SVal
-conjoin (x:xs) = S.svAnd <$> (sValToSBool <$> x) <*> (conjoin xs)
-conjoin [] = return S.svTrue
+conjoin :: [S.SVal] -> S.SVal
+conjoin = foldr (S.svAnd . sValToSBool) S.svTrue
