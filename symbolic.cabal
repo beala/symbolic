@@ -15,6 +15,7 @@ executable symbolic
   ghc-options:         -Wall -Wcompat -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints
   hs-source-dirs:      src
   main-is:             Main.hs
+  other-modules:       Concrete, Programs, SMT, Symbolic, Types, Util
   default-language:    Haskell2010
   default-extensions:  NoImplicitPrelude
                      , OverloadedStrings
