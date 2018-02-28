@@ -76,5 +76,20 @@ addInputs = [ Read
             , Load
             , Done ]
 
+addInputsPrintOver10 :: [Instr]
+addInputsPrintOver10 =
+  [ Read
+  , Read
+  , Add
+  , Dup
+  , Push 10
+  , Lt
+  , Push 10 -- Address of Print instruction
+  , Swap
+  , JmpIf
+  , Done
+  , Print
+  , Done ]
+
 listToProgram :: [Instr] -> Prog
 listToProgram = fromList

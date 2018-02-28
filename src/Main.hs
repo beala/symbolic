@@ -15,11 +15,11 @@ main :: IO ()
 main = do
   args <- getArgs
   let trace = elem "-t" args
-  let prog = listToProgram multiply
+  let prog = listToProgram addInputsPrintOver10
   putStrLn $ show prog
   stack <- run trace prog (0, M.empty, [])
   putStrLn $ show $ wordToSignedInt <$> stack
-  let traces = symbolic 20 prog defaultSymState
+  let traces = symbolic 50 prog defaultSymState
   putStrLn $ fromString $ T.drawTree $ fmap (toList . show . \(pc,_,_,st,cs) -> (pc, renderConstraint <$> st, renderConstraint <$> cs)) traces
   solvedTraces <- solveSym traces
   putStrLn $ fromString $ T.drawTree $ fmap (toList . renderSolvedState) solvedTraces

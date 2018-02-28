@@ -12,12 +12,13 @@ import Types
 import Util
 
 run :: Bool -> Prog -> State-> IO [Word32]
-run trace prg st@(pc, _, stack) = do
-  let Just instr = (prg ! (Offset pc))
-  when trace $ putStrLn $ "Trace: " <> (show pc) <> " " <> (show instr) <> " " <> (show stack)
-  if instr == Done
-    then return stack
-    else step st instr >>= run trace prg
+run trace prg st@(pc, _, stack) =
+  case prg ! (Offset pc) of
+    Just Done -> return stack
+    Just instr -> do
+      when trace $ putStrLn $ "Trace: " <> (show pc) <> " " <> (show instr) <> " " <> (show stack)
+      step st instr >>= run trace prg
+    _ -> error ("No instruction at " <> show pc)
 
 step :: State -> Instr -> IO State
 step (pc, mem, l:r:stack) Add = return (pc+1, mem, l+r : stack)

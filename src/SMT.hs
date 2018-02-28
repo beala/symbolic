@@ -50,8 +50,8 @@ createSym cs = do
 -- | with the others.
 toSMT :: [Constraint] -> S.Symbolic S.SVal
 toSMT c = do
-  let cs = gatherFree (foldr CAnd (CCon 1) c)
-  sValMap <- createSym (S.toList cs)
+  let freeVars = gatherFree (foldr CAnd (CCon 1) c)
+  sValMap <- createSym (S.toList freeVars)
   smts <- traverse (constraintToSMT sValMap) c
   return $ conjoin smts
 
