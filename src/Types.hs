@@ -33,15 +33,16 @@ type Mem = M.Map Word32 Word32
 -- | State: (program counter, memory, stack)
 type State = (Int, Mem, [Word32])
 
-data Constraint = CAdd Constraint Constraint
-                | CEq Constraint Constraint
-                | CNot Constraint
-                | COr Constraint Constraint
-                | CCon Word32
-                | CAnd Constraint Constraint
-                | CLt Constraint Constraint
-                | CAny Int deriving (Show, Eq, Ord)
+data Sym = SAdd Sym Sym
+         | SEq Sym Sym
+         | SNot Sym
+         | SOr Sym Sym
+         | SCon Word32
+         | SAnd Sym Sym
+         | SLt Sym Sym
+         | SAny Int
+         deriving (Show, Eq, Ord)
 
-type SymState = (Int, Int, M.Map Word32 Constraint, [Constraint], [Constraint])
+type SymState = (Int, Int, M.Map Word32 Sym, [Sym], [Sym])
 
 type Trace = T.Tree SymState

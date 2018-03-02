@@ -18,15 +18,15 @@ type SValMap = M.Map Int (S.Symbolic S.SVal)
 
 -- | Walk the constraint gathering up the free
 -- | variables.
-gatherFree :: Constraint -> S.Set Constraint
-gatherFree c@(CAny _) = S.singleton c
-gatherFree (CAdd l r) = gatherFree l <> gatherFree r
-gatherFree (CEq l r) = gatherFree l <> gatherFree r
-gatherFree (CNot c) = gatherFree c
-gatherFree (COr l r) = gatherFree l <> gatherFree r
-gatherFree (CAnd l r) = gatherFree l <> gatherFree r
-gatherFree (CLt l r) = gatherFree l <> gatherFree r
-gatherFree (CCon _) = mempty
+gatherFree :: Sym -> S.Set Sym
+gatherFree c@(SAny _) = S.singleton c
+gatherFree (SAdd l r) = gatherFree l <> gatherFree r
+gatherFree (SEq l r) = gatherFree l <> gatherFree r
+gatherFree (SNot c) = gatherFree c
+gatherFree (SOr l r) = gatherFree l <> gatherFree r
+gatherFree (SAnd l r) = gatherFree l <> gatherFree r
+gatherFree (SLt l r) = gatherFree l <> gatherFree r
+gatherFree (SCon _) = mempty
 
 -- | Create an existential word of `i` bits with
 -- | the name `name`.
@@ -34,12 +34,12 @@ sWordEx :: Int -> String -> S.Symbolic S.SVal
 sWordEx i name =  ask >>= liftIO . S.svMkSymVar (Just S.EX) (S.KBounded False i) (Just (toList name))
 
 -- | Create existential SVals for each of CAny's in the input.
-createSym :: [Constraint] -> S.Symbolic (M.Map Int S.SVal)
+createSym :: [Sym] -> S.Symbolic (M.Map Int S.SVal)
 createSym cs = do
   pairs <- traverse createSymPair cs
   return $  M.fromList pairs
   where readableName i = valName $ i
-        createSymPair (CAny i) = do
+        createSymPair (SAny i) = do
           v <- sWordEx 32 (readableName i)
           return (i, v)
         createSymPair _ = error "Non-variable encountered."
@@ -48,35 +48,35 @@ createSym cs = do
 -- | symbolic value the SMT solver can solve.
 -- | Each constraint in the list is conjoined
 -- | with the others.
-toSMT :: [Constraint] -> S.Symbolic S.SVal
+toSMT :: [Sym] -> S.Symbolic S.SVal
 toSMT c = do
-  let freeVars = gatherFree (foldr CAnd (CCon 1) c)
+  let freeVars = gatherFree (foldr SAnd (SCon 1) c)
   sValMap <- createSym (S.toList freeVars)
   smts <- traverse (constraintToSMT sValMap) c
   return $ conjoin smts
 
-constraintToSMT :: M.Map Int S.SVal -> Constraint -> S.Symbolic S.SVal
-constraintToSMT m (CEq l r) =
+constraintToSMT :: M.Map Int S.SVal -> Sym -> S.Symbolic S.SVal
+constraintToSMT m (SEq l r) =
   sValToSWord <$> (S.svEqual <$> constraintToSMT m l <*> constraintToSMT m r)
-constraintToSMT m (CAdd l r) =
+constraintToSMT m (SAdd l r) =
   S.svPlus <$> constraintToSMT m l <*> constraintToSMT m r
-constraintToSMT _ (CCon w) =  return $ wordToSVal w
-constraintToSMT m (CNot c) =
+constraintToSMT _ (SCon w) =  return $ wordToSVal w
+constraintToSMT m (SNot c) =
   let c' = constraintToSMT m c
   in sValToSWord <$> (S.svNot <$> (sValToSBool <$> c'))
-constraintToSMT m (COr l r) =
+constraintToSMT m (SOr l r) =
   let l' = sValToSBool <$> constraintToSMT m l
       r' = sValToSBool <$> constraintToSMT m r
   in
   sValToSWord <$> (S.svOr <$> l' <*> r')
-constraintToSMT m (CAnd l r) =
+constraintToSMT m (SAnd l r) =
   let l' = sValToSBool <$> constraintToSMT m l
       r' = sValToSBool <$> constraintToSMT m r
   in
     sValToSWord <$> (S.svAnd <$> l' <*> r')
-constraintToSMT m (CLt l r) =
+constraintToSMT m (SLt l r) =
   sValToSWord <$> (S.svLessThan <$> constraintToSMT m l <*> constraintToSMT m r)
-constraintToSMT m (CAny i) = do
+constraintToSMT m (SAny i) = do
   case M.lookup i m of
     Just val -> return val
     Nothing -> error "Missing symbolic variable."
@@ -98,8 +98,8 @@ renderSMTResult _ = "Error"
 renderSolvedState :: SolvedState -> String
 renderSolvedState (SolvedState (pc,_,_,st,cs) c) =
   "PC: " <> show pc <> "\n" <>
-  "Stack: " <> show (renderConstraint <$> st) <> "\n" <>
-  "Path Constraints: " <> show (renderConstraint (foldr CAnd (CCon 1) cs)) <> "\n" <>
+  "Stack: " <> show (renderSym <$> st) <> "\n" <>
+  "Path Syms: " <> show (renderSym (foldr SAnd (SCon 1) cs)) <> "\n" <>
   "Solved Values: " <> renderSMTResult c
                     
 renderDict :: (Show v) => M.Map String v -> String
