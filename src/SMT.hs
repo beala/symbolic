@@ -52,31 +52,31 @@ toSMT :: [Sym] -> S.Symbolic S.SVal
 toSMT c = do
   let freeVars = gatherFree (foldr SAnd (SCon 1) c)
   sValMap <- createSym (S.toList freeVars)
-  smts <- traverse (constraintToSMT sValMap) c
+  smts <- traverse (symToSMT sValMap) c
   return $ conjoin smts
 
-constraintToSMT :: M.Map Int S.SVal -> Sym -> S.Symbolic S.SVal
-constraintToSMT m (SEq l r) =
-  sValToSWord <$> (S.svEqual <$> constraintToSMT m l <*> constraintToSMT m r)
-constraintToSMT m (SAdd l r) =
-  S.svPlus <$> constraintToSMT m l <*> constraintToSMT m r
-constraintToSMT _ (SCon w) =  return $ wordToSVal w
-constraintToSMT m (SNot c) =
-  let c' = constraintToSMT m c
+symToSMT :: M.Map Int S.SVal -> Sym -> S.Symbolic S.SVal
+symToSMT m (SEq l r) =
+  sValToSWord <$> (S.svEqual <$> symToSMT m l <*> symToSMT m r)
+symToSMT m (SAdd l r) =
+  S.svPlus <$> symToSMT m l <*> symToSMT m r
+symToSMT _ (SCon w) =  return $ wordToSVal w
+symToSMT m (SNot c) =
+  let c' = symToSMT m c
   in sValToSWord <$> (S.svNot <$> (sValToSBool <$> c'))
-constraintToSMT m (SOr l r) =
-  let l' = sValToSBool <$> constraintToSMT m l
-      r' = sValToSBool <$> constraintToSMT m r
+symToSMT m (SOr l r) =
+  let l' = sValToSBool <$> symToSMT m l
+      r' = sValToSBool <$> symToSMT m r
   in
   sValToSWord <$> (S.svOr <$> l' <*> r')
-constraintToSMT m (SAnd l r) =
-  let l' = sValToSBool <$> constraintToSMT m l
-      r' = sValToSBool <$> constraintToSMT m r
+symToSMT m (SAnd l r) =
+  let l' = sValToSBool <$> symToSMT m l
+      r' = sValToSBool <$> symToSMT m r
   in
     sValToSWord <$> (S.svAnd <$> l' <*> r')
-constraintToSMT m (SLt l r) =
-  sValToSWord <$> (S.svLessThan <$> constraintToSMT m l <*> constraintToSMT m r)
-constraintToSMT m (SAny i) = do
+symToSMT m (SLt l r) =
+  sValToSWord <$> (S.svLessThan <$> symToSMT m l <*> symToSMT m r)
+symToSMT m (SAny i) = do
   case M.lookup i m of
     Just val -> return val
     Nothing -> error "Missing symbolic variable."
@@ -92,14 +92,17 @@ sValToSWord w = S.svIte w (wordToSVal 1) (wordToSVal 0)
 
 renderSMTResult :: S.SMTResult -> String
 renderSMTResult (S.Unsatisfiable _) = "Unsatisfiable"
-renderSMTResult s@(S.Satisfiable _ _) = renderDict $ M.mapKeys fromList $ S.getModelDictionary s
+renderSMTResult s@(S.Satisfiable _ _) =
+  let dict = M.mapKeys fromList $ S.getModelDictionary s
+  in
+    if M.null dict then "Trivial" else renderDict dict
 renderSMTResult _ = "Error"
 
 renderSolvedState :: SolvedState -> String
 renderSolvedState (SolvedState (pc,_,_,st,cs) c) =
   "PC: " <> show pc <> "\n" <>
   "Stack: " <> show (renderSym <$> st) <> "\n" <>
-  "Path Syms: " <> show (renderSym (foldr SAnd (SCon 1) cs)) <> "\n" <>
+  "Path Constraints: " <> show (renderSym (foldr SAnd (SCon 1) cs)) <> "\n" <>
   "Solved Values: " <> renderSMTResult c
                     
 renderDict :: (Show v) => M.Map String v -> String

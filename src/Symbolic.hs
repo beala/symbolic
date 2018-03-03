@@ -37,8 +37,8 @@ symStep _ Print = error "Print expects one argument."
 symStep (pc, i, mem, x:y:stack, cs) Swap = pure (pc+1, i, mem, y:x:stack, cs)
 symStep _ Swap = error "Swap expects two arguments."
 symStep (pc, i, mem, cond:SCon addr:stack, cs) JmpIf =
-  [ (pc+1, i, mem, stack, SEq cond (SCon 0) : cs)
-  , (wordToInt addr, i, mem, stack, SNot (SEq cond (SCon 0)) : cs)
+  [ (pc+1, i, mem, stack, SNot cond : cs)
+  , (wordToInt addr, i, mem, stack, cond : cs)
   ]
 symStep (pc, i, mem, _:_:stack, cs) JmpIf =
   -- If the jump address is not concrete, don't explore that branch
@@ -78,7 +78,7 @@ defaultSymState :: SymState
 defaultSymState = (0, 0, M.empty, [], [])
 
 renderSym :: Sym -> String
-renderSym (SAdd l r) = renderSym l <> " + " <> renderSym r
+renderSym (SAdd l r) = "(" <> renderSym l <> " + " <> renderSym r <> ")"
 renderSym (SCon w) = show (wordToSignedInt w)
 renderSym (SAny i) = valName i
 renderSym (SEq l r) = renderSym l <> " = " <> renderSym r

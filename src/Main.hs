@@ -17,7 +17,7 @@ main = do
   let trace = elem "-t" args
   let prog = listToProgram addInputsPrintOver10
   putStrLn $ show prog
-  stack <- run trace prog (0, M.empty, [])
+  stack <- return [] -- run trace prog (0, M.empty, [])
   putStrLn $ show $ wordToSignedInt <$> stack
   let traces = symRun 50 prog defaultSymState
   putStrLn $ fromString $ T.drawTree $ fmap (toList . show . \(pc,_,_,st,cs) -> (pc, renderSym <$> st, renderSym <$> cs)) traces

@@ -91,5 +91,12 @@ addInputsPrintOver10 =
   , Print
   , Done ]
 
+loop :: [Instr]
+loop = [ Push 0
+       , Push 1
+       , JmpIf
+       , Done
+       ]
+
 listToProgram :: [Instr] -> Prog
 listToProgram = fromList
