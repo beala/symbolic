@@ -76,13 +76,13 @@ addInputs = [ Read
             , Load
             , Done ]
 
-addInputsPrintOver10 :: [Instr]
-addInputsPrintOver10 =
+addInputsPrintOver15 :: [Instr]
+addInputsPrintOver15 =
   [ Read
   , Read
   , Add
   , Dup
-  , Push 10
+  , Push 15
   , Lt
   , Push 10 -- Address of Print instruction
   , Swap
